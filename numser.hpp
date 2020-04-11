@@ -107,7 +107,7 @@ const std::string NUMSER_RET_STR[] = {
 #define sznumser_hdr sizeof(numser_hdr)
 
 //	64KiB read/write buffer size
-#define sznumser_buf 64 * 1024
+static size_t sznumser_buf = 64 * 1024;
 
 std::string numser_err_str(NUMSER_RET r) {
 	//	validate range
@@ -129,13 +129,8 @@ NUMSER_RET ser_num_vec(const std::vector<T>& v, std::ostream& s) {
 	// size of vector element in bytes
 	size_t sztype_elem = sizeof(T);
 	size_t count = v.size();
-	char* buf = (char*)malloc(sznumser_buf);
-	char* pbuf = buf;
-	NUMSER_RET ret = NUMSER_OK;
 	
-	auto last_elem = v.end() -1;
-
-	//	setup header
+	// setup header
 	numser_hdr hdr;
 	std::memcpy(&hdr.signature, &NUMSER_SIG, SZNUMSER_SIG);
 	hdr.version = NUMSER_VERSION;
@@ -143,42 +138,44 @@ NUMSER_RET ser_num_vec(const std::vector<T>& v, std::ostream& s) {
 	hdr.count = count;
 	hdr.reserved = (uint64_t)0;
 
-	//	write header
+	// write header
 	s.write(reinterpret_cast<char*>(&hdr), sznumser_hdr);
 
 	if (!s.good()) {
-		ret = NUMSER_ERR_WRITE;
-		goto cleanup;
+		return NUMSER_ERR_WRITE;
 	}
 
-	//	loop over vector
-	for (auto it = v.begin(); it <= last_elem; ++it) {
-		// copy element into current buffer pointer
-		*reinterpret_cast<T*>(pbuf) = *it;
+	T* pdata = (T*)v.data();
 
-		// increment buffer pointer by one element size
-		pbuf += sztype_elem;
+	// total bytes to be written
+	size_t btotal = sztype_elem * count;
 
-		//	should we write to stream?
-		if ((size_t)(pbuf - buf) >= sznumser_buf || it == last_elem) {
-			//	write buffer to stream
-			s.write(reinterpret_cast<char*>(buf), pbuf - buf);
-			if (!s.good()) {
-				ret = NUMSER_ERR_WRITE;
-				goto cleanup;
-			}
+	// total bytes written
+	size_t bwritten = 0;
 
-			//	reset buffer pointer
-			pbuf = buf;
+	// bytes to write
+	size_t bw = 0;
 
-			// flush stream buffer
-			s.flush();
+	while ((btotal - bwritten) > 0) {
+		// write at most sznumser_buf bytes at a time
+		bw = std::min<size_t>(btotal - bwritten, sznumser_buf);
+
+		// write data
+		s.write(reinterpret_cast<char*>(pdata), bw);
+
+		// check for error
+		if (!s.good()) {
+			return NUMSER_ERR_WRITE;
 		}
+
+		// keep track of bytes written
+		bwritten += bw;
+
+		// increment pointer to vector data
+		pdata += bw / sztype_elem;
 	}
-// don't judge
-cleanup:
-	free(buf);
-	return ret;
+	
+	return NUMSER_OK;
 }
 
 //	serialize a vector<T> to a file
@@ -216,59 +213,40 @@ NUMSER_RET numser_check_hdr(const numser_hdr* hdr) {
 //		single,   double
 NUMSER_TPL_REQ_NUM
 NUMSER_RET deser_num_vec(std::istream& s, std::vector<T>& v) {
-	// size of vector element in bytes
-	size_t sztype_elem = sizeof(T);
-	char* buf = (char*)malloc(sznumser_buf);
 	NUMSER_RET ret = NUMSER_OK;
 
-	//	minimal sanity check
+	// minimal sanity check
 	numser_hdr hdr;
 
+	// read header
 	s.read(reinterpret_cast<char*>(&hdr), sznumser_hdr);
 	
 	size_t bread = 0;
 	size_t btotal = hdr.count * hdr.szelem;
 
-	if (!s.good()) {
-		ret = NUMSER_ERR_READ;
-		goto cleanup;
-	}
+	if (!s.good()) return NUMSER_ERR_READ;
 
 	ret = numser_check_hdr<T>(&hdr);
-	if (ret != NUMSER_OK) goto cleanup;
+	if (ret != NUMSER_OK) return ret;
 
 	//	preallocate
 	v.reserve(hdr.count);
+
+	T* pdata = (T*)v.data();
 
 	while (bread < btotal) {
 		//	how many bytes can we read at a time?
 		size_t bytes = std::min<size_t>(btotal - bread, sznumser_buf);
 
 		//	read this many bytes
-		s.read(buf, bytes);
+		s.read(reinterpret_cast<char*>(pdata), bytes);
 
-		if (!s.good()) {
-			ret = NUMSER_ERR_READ;
-			goto cleanup;
-		}
+		if (!s.good()) return NUMSER_ERR_READ;
 
 		//	keep count
 		bread += bytes;
-
-		//	grap ref to buf
-		char* pbuf = buf;
-
-		while ((size_t)(pbuf - buf) < bytes) {
-			//	add item to vector
-			v.push_back(*reinterpret_cast<T*>(pbuf));
-
-			//	increment pointer to buf by element size
-			pbuf += sztype_elem;
-		}
 	}
-//	don't judge
-cleanup:
-	free(buf);
+	
 	return ret;
 }
 

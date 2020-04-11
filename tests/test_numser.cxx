@@ -37,6 +37,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <limits>
 #include <errno.h>
 
+#include <chrono>
+
 #include "../numser.hpp"
 
 static uint cnt_test_pass = 0;
@@ -217,7 +219,9 @@ int main(int argc, char *argv[]) {
 			print_help(std::string(argv[0]));
 			return 0;
 		}
-	}	
+	}
+
+	auto tbegin = std::chrono::high_resolution_clock::now();
 
 	run_tests<int8_t>();
 	run_tests<uint8_t>();
@@ -229,6 +233,11 @@ int main(int argc, char *argv[]) {
 	run_tests<uint64_t>();
 	run_tests<float>();
 	run_tests<double>();
+
+	auto tend = std::chrono::high_resolution_clock::now();
+	auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(tend - tbegin).count();
+
+	std::cout << "Duration: " << ms << " ms" << std::endl;
 
 	std::cout << std::endl << "\033[1;37mTESTS " << cnt_test_pass + cnt_test_fail << " \033[1;32mPASSED " << cnt_test_pass << " \033[1;31mFAILED " << cnt_test_fail << "\033[0m" << std::endl;
 
